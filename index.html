@@ -221,11 +221,12 @@
         const tokenId = document.getElementById("tokenId").value;
         const address = document.getElementById("contractAddress").value;
 
-        if (!tokenId || !address || address.length != 42 || address.slice(0, 2).toUpperCase()  != "0X") {
-           alert("Contract Address or Token ID invalid") ;
-           resetButton();
-           return;
-        }
+        if (address != "")
+            if (!tokenId || !address || address.length != 42 || address.slice(0, 2).toUpperCase()  != "0X") {
+                alert("Contract Address or Token ID invalid") ;
+                resetButton();
+                return;
+            }
 
         clearInnerHTML();
         document.getElementById("loading").classList.remove("d-none");
@@ -320,26 +321,42 @@
 
             let readBuffer = response.data;
 
-            updateState("Decrypting - LIT Auth",50);
-            // check and sign auth message
-            const authSign = await LitJsSdk.checkAndSignAuthMessage({ chain: chainID });
+            let view = new Uint8Array(readBuffer);            
+            //Check if file is already a ZIP (unencrypted)
+            let isZipFile = 1;
+            const zipMagicBytes = [0x50, 0x4B, 0x03, 0x04];
+            for (const [index, value] of zipMagicBytes.entries()) {
+                if (value !== view[index]) 
+                    isZipFile=0
+            }
+            
+            let decryptedBlobArrayBuffer = undefined;
+            //Decrypt encrypted archive
+            if (!isZipFile)  {
+            
+                updateState("Decrypting - LIT Auth",50);
+                // check and sign auth message
+                const authSign = await LitJsSdk.checkAndSignAuthMessage({ chain: chainID });
 
-            let litNodeClient = new LitJsSdk.LitNodeClient({ alertWhenUnauthorized: false });
+                let litNodeClient = new LitJsSdk.LitNodeClient({ alertWhenUnauthorized: false });
 
-            await litNodeClient.connect();
+                await litNodeClient.connect();
 
-            const SYMM_KEY_ALGO_PARAMS = {
-                name: "AES-CBC",
-                length: 256
-            };
+                const SYMM_KEY_ALGO_PARAMS = {
+                    name: "AES-CBC",
+                    length: 256
+                };
 
-            updateState("Decrypting - LIT key decryption",55);
-            const unlockedKey = await litNodeClient.getEncryptionKey({ accessControlConditions: accessConditions, toDecrypt: litKey, authSig: authSign, chain: chainID });
-            const unlockedSymmKey = await crypto.subtle.importKey("raw", unlockedKey, SYMM_KEY_ALGO_PARAMS, true, ["encrypt", "decrypt"]);
+                updateState("Decrypting - LIT key decryption",55);
+                const unlockedKey = await litNodeClient.getEncryptionKey({ accessControlConditions: accessConditions, toDecrypt: litKey, authSig: authSign, chain: chainID });
+                const unlockedSymmKey = await crypto.subtle.importKey("raw", unlockedKey, SYMM_KEY_ALGO_PARAMS, true, ["encrypt", "decrypt"]);
 
-            updateState("Decrypting - Content",60);
-            // Decrypt data
-            let decryptedBlobArrayBuffer = await LitJsSdk.decryptWithSymmetricKey(new Blob([readBuffer]), unlockedSymmKey);
+                updateState("Decrypting - Content",60);
+                // Decrypt data
+                decryptedBlobArrayBuffer = await LitJsSdk.decryptWithSymmetricKey(new Blob([readBuffer]), unlockedSymmKey);
+            } else {
+                decryptedBlobArrayBuffer=readBuffer;
+            }
 
             Loaddata(decryptedBlobArrayBuffer, readBuffer);
 
@@ -498,6 +515,7 @@
 
     async function Loaddata(BA, EA) { // Load data from decrypted archive
 
+        console.log(BA);
         JSzip = new JSZip();
 
         var proofs = {}
